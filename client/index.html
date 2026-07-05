@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chat — HW5</title>
+
+    <!-- protobuf.js from CDN (handles proto3 encoding/decoding in pure JS) -->
+    <script src="https://cdn.jsdelivr.net/npm/protobufjs@7.2.5/dist/protobuf.min.js"></script>
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #e9ecef;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .panel {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+            padding: 32px;
+            width: 100%;
+            max-width: 480px;
+        }
+
+        /* ---- join panel ---- */
+        #join-panel h2 { text-align: center; margin-bottom: 24px; color: #1a1a2e; }
+        #join-panel label { display: block; margin-bottom: 6px; font-size: 14px; color: #555; }
+
+        .form-row { margin-bottom: 16px; }
+
+        input[type="text"] {
+            width: 100%; padding: 10px 12px; border: 1.5px solid #ccc;
+            border-radius: 8px; font-size: 15px; outline: none;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus { border-color: #4361ee; }
+
+        .avatar-row {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+        }
+        #avatar-preview {
+            width: 56px; height: 56px; border-radius: 50%;
+            object-fit: cover; border: 2px solid #eee; display: none;
+        }
+        .btn-secondary {
+            padding: 8px 16px; background: #f0f2f5; border: 1.5px solid #ccc;
+            border-radius: 8px; cursor: pointer; font-size: 14px;
+            transition: background 0.2s;
+        }
+        .btn-secondary:hover { background: #e0e3ea; }
+
+        .btn-primary {
+            width: 100%; padding: 12px; background: #4361ee; color: #fff;
+            border: none; border-radius: 8px; font-size: 16px; cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #3451d1; }
+        .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
+
+        #join-status { margin-top: 12px; font-size: 14px; text-align: center; min-height: 20px; }
+        .status-error { color: #e53e3e; }
+        .status-info  { color: #3182ce; }
+
+        /* ---- chat panel ---- */
+        #chat-panel { display: none; max-width: 800px; }
+
+        .chat-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee;
+        }
+        .chat-header h3 { color: #1a1a2e; }
+        #online-count { font-size: 13px; color: #718096; }
+        #my-name-display { font-weight: 600; color: #4361ee; }
+
+        #messages-area {
+            height: 320px; overflow-y: auto; border: 1.5px solid #e2e8f0;
+            border-radius: 8px; padding: 12px; font-size: 14px; line-height: 1.6;
+            background: #f7f9fc; margin-bottom: 12px;
+            white-space: pre-wrap; word-break: break-word;
+        }
+
+        .msg-line { margin-bottom: 4px; }
+        .msg-line.private { color: #805ad5; font-style: italic; }
+        .msg-line.system  { color: #718096; font-size: 12px; }
+        .msg-line.error   { color: #e53e3e; }
+        .msg-sender { font-weight: 600; }
+
+        /* Image blocks rendered inline inside #messages-area */
+        .chat-image-block {
+            display: block; margin: 4px 0 6px 0;
+        }
+        .chat-image-block img {
+            max-width: 220px; max-height: 160px; border-radius: 6px;
+            border: 1px solid #e2e8f0; cursor: pointer; display: block;
+        }
+        .sender-with-avatar {
+            display: flex; align-items: center; gap: 6px;
+        }
+        .sender-avatar {
+            width: 24px; height: 24px; border-radius: 50%;
+            object-fit: cover; border: 1px solid #e2e8f0;
+        }
+
+        /* Input row */
+        .input-row {
+            display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+        }
+        #message-input {
+            flex: 1; padding: 10px 12px; border: 1.5px solid #ccc;
+            border-radius: 8px; font-size: 15px; outline: none;
+        }
+        #message-input:focus { border-color: #4361ee; }
+        #char-count { font-size: 12px; color: #a0aec0; min-width: 40px; text-align: right; }
+
+        .action-row { display: flex; gap: 8px; }
+        .action-row .btn-primary { flex: 1; padding: 10px; font-size: 14px; }
+
+        #attach-preview {
+            display: none; align-items: center; gap: 8px;
+            margin-bottom: 8px; font-size: 13px; color: #555;
+        }
+        #attach-preview img { max-height: 48px; border-radius: 4px; }
+        #clear-attach { cursor: pointer; color: #e53e3e; font-size: 18px; line-height: 1; }
+
+        #conn-status {
+            text-align: center; padding: 8px; font-size: 13px;
+            border-radius: 6px; margin-bottom: 8px;
+        }
+        .conn-ok      { background: #c6f6d5; color: #276749; }
+        .conn-waiting { background: #fefcbf; color: #744210; }
+        .conn-lost    { background: #fed7d7; color: #742a2a; }
+
+        /* Lightbox */
+        #lightbox {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+            z-index: 1000; align-items: center; justify-content: center;
+        }
+        #lightbox.open { display: flex; }
+        #lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+        #lightbox-close {
+            position: absolute; top: 20px; right: 28px; color: #fff;
+            font-size: 36px; cursor: pointer; line-height: 1;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===================== JOIN PANEL ===================== -->
+<div class="panel" id="join-panel">
+    <h2>💬 WebSocket Chat</h2>
+
+    <div class="form-row">
+        <label for="name-input">Ваше имя</label>
+        <input type="text" id="name-input" placeholder="Введите имя..." maxlength="50">
+    </div>
+
+    <div class="form-row">
+        <label>Аватар (необязательно)</label>
+        <div class="avatar-row">
+            <img id="avatar-preview" alt="avatar">
+            <button class="btn-secondary" onclick="document.getElementById('avatar-file').click()">
+                Выбрать фото
+            </button>
+            <span id="avatar-name" style="font-size:13px;color:#718096;">не выбран</span>
+        </div>
+        <input type="file" id="avatar-file" accept="image/jpeg,image/png" style="display:none">
+    </div>
+
+    <button class="btn-primary" id="join-btn" onclick="startJoin()">Присоединиться</button>
+    <div id="join-status"></div>
+</div>
+
+<!-- ===================== CHAT PANEL ===================== -->
+<div class="panel" id="chat-panel">
+    <div class="chat-header">
+        <h3>Чат — <span id="my-name-display"></span></h3>
+        <span id="online-count">Online: 0</span>
+    </div>
+
+    <div id="conn-status" class="conn-ok">Подключено</div>
+
+    <div id="messages-area"></div>
+
+    <div id="attach-preview">
+        <img id="attach-thumb" alt="">
+        <span id="attach-label">изображение прикреплено</span>
+        <span id="clear-attach" onclick="clearAttach()" title="Убрать">✕</span>
+    </div>
+
+    <div class="input-row">
+        <input type="text" id="message-input"
+               placeholder="Сообщение... (или @имя текст)" maxlength="25"
+               oninput="onInputChange()" onkeydown="onInputKey(event)">
+        <span id="char-count">0/25</span>
+    </div>
+
+    <div class="action-row">
+        <button class="btn-secondary" id="attach-btn" onclick="document.getElementById('image-file').click()">
+            📎 Прикрепить
+        </button>
+        <button class="btn-primary" id="send-btn" onclick="sendMessage()">Отправить</button>
+    </div>
+    <input type="file" id="image-file" accept="image/jpeg,image/png" style="display:none">
+</div>
+
+<!-- Lightbox for full-size images -->
+<div id="lightbox">
+    <span id="lightbox-close" onclick="closeLightbox()">✕</span>
+    <img id="lightbox-img" alt="">
+</div>
+
+<!-- ===================== JAVASCRIPT ===================== -->
+<script>
+// ---------------------------------------------------------------------------
+// Proto3 schema — parsed at runtime by protobuf.js
+// ---------------------------------------------------------------------------
+const PROTO_SCHEMA = `
+syntax = "proto3";
+package chat;
+
+message ClientRequest {
+  enum RequestType { JOIN = 0; CHAT = 1; PRIVATE_CHAT = 2; }
+  RequestType type = 1;
+  optional JoinRequest join = 2;
+  optional ChatRequest chat = 3;
+  optional PrivateChatRequest private_chat = 4;
+}
+message JoinRequest {
+  string name = 1;
+  optional bytes avatar = 2;
+  string avatar_mime = 3;
+}
+message ChatRequest {
+  string text = 1;
+  optional bytes image = 2;
+  string image_mime = 3;
+}
+message PrivateChatRequest {
+  string target_name = 1;
+  string text = 2;
+  optional bytes image = 3;
+  string image_mime = 4;
+}
+
+message ServerResponse {
+  enum ResponseType {
+    JOIN_SUCCESS = 0; JOIN_ERROR = 1; NEW_MESSAGE = 2;
+    PRIVATE_MESSAGE = 3; ERROR = 4; USER_JOINED = 5; USER_LEFT = 6;
+  }
+  ResponseType type = 1;
+  optional JoinSuccessResponse join_success = 2;
+  optional ErrorResponse error = 3;
+  optional BroadcastMessage broadcast = 4;
+  optional PrivateMessage private_msg = 5;
+  optional UserEvent user_event = 6;
+}
+message JoinSuccessResponse {
+  repeated HistoryMessage history = 1;
+  optional bytes last_image = 2;
+  string last_image_mime = 3;
+  int32 active_users = 4;
+}
+message HistoryMessage {
+  string sender_name = 1;
+  string text = 2;
+  int64 timestamp = 3;
+  bool has_image = 4;
+  optional bytes image = 5;
+  string image_mime = 6;
+  bool is_private = 7;
+  optional bytes sender_avatar = 8;
+  string sender_avatar_mime = 9;
+}
+message BroadcastMessage {
+  string sender_name = 1;
+  string text = 2;
+  int64 timestamp = 3;
+  bool has_image = 4;
+  optional bytes image = 5;
+  string image_mime = 6;
+  optional bytes sender_avatar = 7;
+  string sender_avatar_mime = 8;
+}
+message PrivateMessage {
+  string sender_name = 1;
+  string text = 2;
+  int64 timestamp = 3;
+  bool has_image = 4;
+  optional bytes image = 5;
+  string image_mime = 6;
+}
+message UserEvent {
+  string user_name = 1;
+  bool joined = 2;
+  int32 active_users = 3;
+}
+message ErrorResponse {
+  int32 error_code = 1;
+  string error_message = 2;
+}
+`;
+
+// ---------------------------------------------------------------------------
+// Global state
+// ---------------------------------------------------------------------------
+let root, ClientRequest, ServerResponse;   // protobuf types
+let ws           = null;
+let myName       = '';
+let avatarBytes  = null;   // Uint8Array | null
+let avatarMime   = '';
+let imageBytes   = null;   // attachment for next message
+let imageMime    = '';
+let joined       = false;
+let joinErrorOccurred = false;   // prevents reconnect timer on name-conflict errors
+
+// Reconnect state (used when NOT yet joined)
+let reconnectTimer       = null;
+let reconnectCountdown   = 0;
+let pendingJoinPayload   = null;   // { name, avatarBytes, avatarMime }
+
+const WS_URL = 'ws://localhost:8080/ws';
+
+// ---------------------------------------------------------------------------
+// Boot: parse protobuf schema
+// ---------------------------------------------------------------------------
+(function boot() {
+    try {
+        root          = protobuf.parse(PROTO_SCHEMA, { keepCase: true }).root;
+        ClientRequest = root.lookupType('chat.ClientRequest');
+        ServerResponse = root.lookupType('chat.ServerResponse');
+    } catch (e) {
+        showJoinStatus('Ошибка инициализации protobuf: ' + e.message, true);
+    }
+})();
+
+// ---------------------------------------------------------------------------
+// Avatar file picker
+// ---------------------------------------------------------------------------
+document.getElementById('avatar-file').addEventListener('change', function () {
+    const file = this.files[0];
+    if (!file) return;
+    if (file.size > 200 * 1024) {
+        showJoinStatus('Аватар должен быть меньше 200 KB', true);
+        return;
+    }
+    avatarMime = file.type;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        avatarBytes = new Uint8Array(e.target.result);
+        const preview = document.getElementById('avatar-preview');
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+        document.getElementById('avatar-name').textContent = file.name;
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+// Image attachment picker
+document.getElementById('image-file').addEventListener('change', function () {
+    const file = this.files[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+        appendSystemMsg('Изображение должно быть меньше 1 МБ', 'error');
+        return;
+    }
+    imageMime = file.type;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        imageBytes = new Uint8Array(e.target.result);
+        const thumb = document.getElementById('attach-thumb');
+        thumb.src = e.target.result;
+        const attachPreview = document.getElementById('attach-preview');
+        attachPreview.style.display = 'flex';
+        document.getElementById('attach-label').textContent = file.name;
+    };
+    reader.readAsArrayBuffer(file);
+    this.value = '';   // allow re-selecting same file
+});
+
+// ---------------------------------------------------------------------------
+// JOIN flow
+// ---------------------------------------------------------------------------
+function startJoin() {
+    const nameInput = document.getElementById('name-input');
+    const name = nameInput.value.trim();
+    if (!name) {
+        showJoinStatus('Введите имя', true);
+        return;
+    }
+
+    myName           = name;
+    pendingJoinPayload = { name, avatarBytes, avatarMime };
+    cancelReconnect();
+    connect();
+}
+
+function connect() {
+    setJoinBtnEnabled(false);
+    showJoinStatus('Подключаемся...', false);
+
+    try {
+        ws = new WebSocket(WS_URL);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = function () {
+            cancelReconnect();
+            // Send JOIN request immediately after WS handshake
+            sendJoinRequest(pendingJoinPayload);
+        };
+
+        ws.onmessage = function (event) {
+            handleServerMessage(new Uint8Array(event.data));
+        };
+
+        ws.onerror = function () {
+            // onclose will fire next
+        };
+
+        ws.onclose = function () {
+            // JOIN_ERROR closes the socket intentionally — don't trigger reconnect
+            if (joinErrorOccurred) {
+                joinErrorOccurred = false;
+                return;
+            }
+            if (!joined) {
+                scheduleReconnect();
+            } else {
+                joined = false;
+                setControlsEnabled(false);
+                updateConnStatus('Соединение потеряно. Reconnect через 10 с…', 'conn-lost');
+                scheduleReconnectInChat();
+            }
+        };
+    } catch (e) {
+        scheduleReconnect();
+    }
+}
+
+function sendJoinRequest(payload) {
+    const msg = ClientRequest.create({
+        type: 0,  // JOIN
+        join: {
+            name:        payload.name,
+            avatar:      payload.avatarBytes ? payload.avatarBytes : null,
+            avatar_mime: payload.avatarBytes ? payload.avatarMime  : ''
+        }
+    });
+    sendProto(msg);
+}
+
+// ---------------------------------------------------------------------------
+// Reconnect logic (before join)
+// ---------------------------------------------------------------------------
+function scheduleReconnect() {
+    reconnectCountdown = 10;
+    showJoinStatus(buildCountdownMsg(), false);
+    reconnectTimer = setInterval(function () {
+        reconnectCountdown--;
+        if (reconnectCountdown <= 0) {
+            cancelReconnect();
+            connect();
+        } else {
+            showJoinStatus(buildCountdownMsg(), false);
+        }
+    }, 1000);
+}
+
+function buildCountdownMsg() {
+    return `Не удалось подключиться. Повтор через ${reconnectCountdown} с…`;
+}
+
+function cancelReconnect() {
+    if (reconnectTimer) {
+        clearInterval(reconnectTimer);
+        reconnectTimer = null;
+    }
+}
+
+// Reconnect after losing connection while in the chat
+function scheduleReconnectInChat() {
+    let cd = 10;
+    updateConnStatus(`Соединение потеряно. Reconnect через ${cd} с…`, 'conn-lost');
+    const t = setInterval(function () {
+        cd--;
+        if (cd <= 0) {
+            clearInterval(t);
+            // Re-show join panel
+            document.getElementById('chat-panel').style.display = 'none';
+            document.getElementById('join-panel').style.display = 'block';
+            pendingJoinPayload = { name: myName, avatarBytes, avatarMime };
+            connect();
+        } else {
+            updateConnStatus(`Соединение потеряно. Reconnect через ${cd} с…`, 'conn-lost');
+        }
+    }, 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Handle incoming server messages (Protobuf-decoded)
+// ---------------------------------------------------------------------------
+function handleServerMessage(data) {
+    let resp;
+    try {
+        resp = ServerResponse.decode(data);
+    } catch (e) {
+        console.error('Decode error:', e);
+        return;
+    }
+
+    const RT = ServerResponse.ResponseType || ServerResponse.values;
+
+    switch (resp.type) {
+        case 0: // JOIN_SUCCESS
+            onJoinSuccess(resp.join_success);
+            break;
+        case 1: // JOIN_ERROR
+            onJoinError(resp.error);
+            break;
+        case 2: // NEW_MESSAGE
+            onNewMessage(resp.broadcast);
+            break;
+        case 3: // PRIVATE_MESSAGE
+            onPrivateMessage(resp.private_msg);
+            break;
+        case 4: // ERROR
+            onError(resp.error);
+            break;
+        case 5: // USER_JOINED
+            onUserJoined(resp.user_event);
+            break;
+        case 6: // USER_LEFT
+            onUserLeft(resp.user_event);
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JOIN SUCCESS
+// ---------------------------------------------------------------------------
+function onJoinSuccess(payload) {
+    joined = true;
+
+    // Hide join panel, show chat panel
+    document.getElementById('join-panel').style.display = 'none';
+    const chatPanel = document.getElementById('chat-panel');
+    chatPanel.style.display = 'block';
+
+    document.getElementById('my-name-display').textContent = myName;
+    updateConnStatus('Подключено', 'conn-ok');
+    setControlsEnabled(true);
+
+    updateOnlineCount(payload.active_users);
+
+    // Render history
+    clearMessages();
+    if (payload.history && payload.history.length > 0) {
+        appendSystemMsg(`── История (${payload.history.length} сообщений) ──`, 'system');
+        for (const h of payload.history) {
+            renderHistoryMessage(h);
+        }
+        appendSystemMsg('── Конец истории ──', 'system');
+    } else {
+        appendSystemMsg('Чат пуст. Будьте первым!', 'system');
+    }
+
+    // last_image is already included in history entries — no separate display to avoid duplicates
+
+    scrollToBottom();
+}
+
+// ---------------------------------------------------------------------------
+// JOIN ERROR
+// ---------------------------------------------------------------------------
+function onJoinError(error) {
+    joinErrorOccurred = true;   // tell onclose not to start reconnect timer
+    ws.close();
+    const msg = error ? error.error_message : 'Ошибка входа';
+    showJoinStatus(msg, true);
+    setJoinBtnEnabled(true);
+}
+
+// ---------------------------------------------------------------------------
+// NEW MESSAGE (broadcast)
+// ---------------------------------------------------------------------------
+function onNewMessage(broadcast) {
+    if (!broadcast) return;
+    const ts = formatTime(broadcast.timestamp);
+
+    // Avatar thumbnail inline with sender name
+    let avatarHtml = '';
+    if (broadcast.sender_avatar && broadcast.sender_avatar.length > 0) {
+        const url = bytesToDataUrl(broadcast.sender_avatar, broadcast.sender_avatar_mime);
+        avatarHtml = `<img class="sender-avatar" src="${url}" alt="">`;
+    }
+
+    const displayText = broadcast.text || '(изображение)';
+    const imgBadge = (broadcast.has_image) ? ' 📷' : '';
+
+    const line = document.createElement('div');
+    line.className = 'msg-line';
+    line.innerHTML =
+        `<span class="sender-with-avatar">${avatarHtml}<span class="msg-sender">${escHtml(broadcast.sender_name)}</span></span>` +
+        ` [${ts}]: ${escHtml(displayText)}${imgBadge}`;
+    document.getElementById('messages-area').appendChild(line);
+
+    if (broadcast.has_image && broadcast.image && broadcast.image.length > 0) {
+        showImage(broadcast.image, broadcast.image_mime, broadcast.sender_name);
+    }
+
+    scrollToBottom();
+}
+
+// ---------------------------------------------------------------------------
+// PRIVATE MESSAGE
+// ---------------------------------------------------------------------------
+function onPrivateMessage(pm) {
+    if (!pm) return;
+    const ts = formatTime(pm.timestamp);
+    const isMine = (pm.sender_name === myName);
+    const label  = isMine
+        ? `[Вы → приватно] [${ts}]: ${pm.text}`
+        : `[Личное от ${pm.sender_name}] [${ts}]: ${pm.text}`;
+
+    appendMsg(label, 'private');
+
+    if (pm.has_image && pm.image && pm.image.length > 0) {
+        showImage(pm.image, pm.image_mime, pm.sender_name + ' (PM)');
+    }
+
+    scrollToBottom();
+}
+
+// ---------------------------------------------------------------------------
+// ERROR
+// ---------------------------------------------------------------------------
+function onError(error) {
+    const msg = error ? `Ошибка ${error.error_code}: ${error.error_message}` : 'Неизвестная ошибка';
+    if (joined) {
+        appendMsg(msg, 'error');
+    } else {
+        showJoinStatus(msg, true);
+        setJoinBtnEnabled(true);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// USER_JOINED / USER_LEFT
+// ---------------------------------------------------------------------------
+function onUserJoined(event) {
+    if (!event) return;
+    appendSystemMsg(`→ ${event.user_name} присоединился. Online: ${event.active_users}`, 'system');
+    updateOnlineCount(event.active_users);
+    scrollToBottom();
+}
+
+function onUserLeft(event) {
+    if (!event) return;
+    appendSystemMsg(`← ${event.user_name} покинул чат. Online: ${event.active_users}`, 'system');
+    updateOnlineCount(event.active_users);
+    scrollToBottom();
+}
+
+// ---------------------------------------------------------------------------
+// Render one history message
+// ---------------------------------------------------------------------------
+function renderHistoryMessage(h) {
+    const ts          = formatTime(h.timestamp);
+    const displayText = h.text || '(изображение)';
+    const imgBadge    = h.has_image ? ' 📷' : '';
+
+    if (h.is_private) {
+        appendMsg(`${h.sender_name} [${ts}]: ${displayText}${imgBadge}`, 'private');
+    } else {
+        // Build inline avatar if present
+        let avatarHtml = '';
+        if (h.sender_avatar && h.sender_avatar.length > 0) {
+            const url = bytesToDataUrl(h.sender_avatar, h.sender_avatar_mime);
+            avatarHtml = `<img class="sender-avatar" src="${url}" alt="">`;
+        }
+        const line = document.createElement('div');
+        line.className = 'msg-line';
+        line.innerHTML =
+            `<span class="sender-with-avatar">${avatarHtml}<span class="msg-sender">${escHtml(h.sender_name)}</span></span>` +
+            ` [${ts}]: ${escHtml(displayText)}${imgBadge}`;
+        document.getElementById('messages-area').appendChild(line);
+    }
+
+    if (h.has_image && h.image && h.image.length > 0) {
+        showImage(h.image, h.image_mime, h.sender_name);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SEND MESSAGE
+// ---------------------------------------------------------------------------
+function sendMessage() {
+    const input = document.getElementById('message-input');
+    const text  = input.value.trim();
+    if (!text && !imageBytes) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Detect private message: @name text
+    const privateMatch = text.match(/^@(\S+)\s+([\s\S]*)$/);
+
+    if (privateMatch) {
+        const targetName = privateMatch[1];
+        const pmText     = privateMatch[2].substring(0, 25);
+
+        const msg = ClientRequest.create({
+            type: 2,  // PRIVATE_CHAT
+            private_chat: {
+                target_name: targetName,
+                text:        pmText,
+                image:       imageBytes ? imageBytes : null,
+                image_mime:  imageBytes ? imageMime  : ''
+            }
+        });
+        sendProto(msg);
+    } else {
+        const msg = ClientRequest.create({
+            type: 1,  // CHAT
+            chat: {
+                text:       text.substring(0, 25),
+                image:      imageBytes ? imageBytes : null,
+                image_mime: imageBytes ? imageMime  : ''
+            }
+        });
+        sendProto(msg);
+    }
+
+    input.value = '';
+    onInputChange();
+    clearAttach();
+}
+
+// ---------------------------------------------------------------------------
+// Proto encode & send
+// ---------------------------------------------------------------------------
+function sendProto(message) {
+    try {
+        const err = ClientRequest.verify(message);
+        if (err) { console.error('Proto verify:', err); return; }
+        const buf = ClientRequest.encode(message).finish();
+        ws.send(buf);
+    } catch (e) {
+        console.error('Send error:', e);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+function onInputChange() {
+    const v = document.getElementById('message-input').value;
+    document.getElementById('char-count').textContent = `${v.length}/25`;
+}
+
+function onInputKey(e) {
+    if (e.key === 'Enter') sendMessage();
+}
+
+function clearAttach() {
+    imageBytes = null;
+    imageMime  = '';
+    document.getElementById('attach-preview').style.display = 'none';
+    document.getElementById('image-file').value = '';
+}
+
+function showImage(imgBytes, mime, sender) {
+    const url   = bytesToDataUrl(imgBytes, mime);
+    const area  = document.getElementById('messages-area');
+    const block = document.createElement('div');
+    block.className = 'chat-image-block';
+    block.innerHTML =
+        `<img src="${url}" alt="image" onclick="openLightbox(this.src)">`;
+    area.appendChild(block);
+}
+
+function openLightbox(src) {
+    document.getElementById('lightbox-img').src = src;
+    document.getElementById('lightbox').classList.add('open');
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('open');
+}
+
+function appendMsg(text, cls) {
+    const area = document.getElementById('messages-area');
+    const div  = document.createElement('div');
+    div.className = 'msg-line' + (cls ? ' ' + cls : '');
+    div.textContent = text;
+    area.appendChild(div);
+}
+
+function appendSystemMsg(text, cls) {
+    appendMsg(text, cls || 'system');
+}
+
+function clearMessages() {
+    document.getElementById('messages-area').innerHTML = '';
+}
+
+function scrollToBottom() {
+    const area = document.getElementById('messages-area');
+    area.scrollTop = area.scrollHeight;
+}
+
+function updateOnlineCount(n) {
+    document.getElementById('online-count').textContent = `Online: ${n}`;
+}
+
+function updateConnStatus(text, cls) {
+    const el = document.getElementById('conn-status');
+    el.textContent  = text;
+    el.className    = cls;
+}
+
+function setControlsEnabled(enabled) {
+    document.getElementById('message-input').disabled = !enabled;
+    document.getElementById('send-btn').disabled      = !enabled;
+    document.getElementById('attach-btn').disabled    = !enabled;
+}
+
+function setJoinBtnEnabled(enabled) {
+    document.getElementById('join-btn').disabled      = !enabled;
+    document.getElementById('name-input').disabled    = !enabled;
+}
+
+function showJoinStatus(msg, isError) {
+    const el = document.getElementById('join-status');
+    el.textContent  = msg;
+    el.className    = isError ? 'status-error' : 'status-info';
+}
+
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
+function bytesToDataUrl(bytes, mime) {
+    // bytes may be a Uint8Array or a Long-keyed object from protobufjs
+    let arr = bytes;
+    if (!(arr instanceof Uint8Array)) {
+        arr = new Uint8Array(Object.values(bytes));
+    }
+    let binary = '';
+    for (let i = 0; i < arr.length; i++) {
+        binary += String.fromCharCode(arr[i]);
+    }
+    return `data:${mime};base64,` + btoa(binary);
+}
+
+function formatTime(ts) {
+    // ts is a Long from protobufjs; convert to JS number
+    const ms = typeof ts === 'object' && ts !== null ? ts.toNumber() : Number(ts);
+    if (!ms) return '';
+    const d = new Date(ms);
+    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function escHtml(str) {
+    if (!str) return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// Close lightbox on background click
+document.getElementById('lightbox').addEventListener('click', function (e) {
+    if (e.target === this) closeLightbox();
+});
+</script>
+</body>
+</html>
