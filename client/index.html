@@ -159,7 +159,7 @@
 
     <div class="form-row">
         <label for="name-input">Ваше имя</label>
-        <input type="text" id="name-input" placeholder="Введите имя..." maxlength="50">
+        <input type="text" id="name-input" placeholder="Введите имя..." >
     </div>
 
     <div class="form-row">
@@ -197,7 +197,7 @@
 
     <div class="input-row">
         <input type="text" id="message-input"
-               placeholder="Сообщение... (или @имя текст)" maxlength="25"
+               placeholder="Сообщение... (или @имя текст)"
                oninput="onInputChange()" onkeydown="onInputKey(event)">
         <span id="char-count">0/25</span>
     </div>
@@ -319,6 +319,8 @@ let avatarMime   = '';
 let imageBytes   = null;   // attachment for next message
 let imageMime    = '';
 let joined       = false;
+let avatarLoadId = 0, imageLoadId = 0;
+let avatarLoading = false, imageLoading = false;
 let joinErrorOccurred = false;   // prevents reconnect timer on name-conflict errors
 
 // Reconnect state (used when NOT yet joined)
@@ -344,45 +346,77 @@ const WS_URL = 'ws://localhost:8080/ws';
 // ---------------------------------------------------------------------------
 // Avatar file picker
 // ---------------------------------------------------------------------------
+function validFile(file, limit) {
+    return file.size > 0 && file.size <= limit && ['image/png', 'image/jpeg'].includes(file.type);
+}
+
+function clearAvatar() {
+    avatarLoadId++;
+    avatarLoading = false;
+    avatarBytes = null;
+    avatarMime = '';
+    const preview = document.getElementById('avatar-preview');
+    preview.removeAttribute('src');
+    preview.style.display = 'none';
+    document.getElementById('avatar-file').value = '';
+    document.getElementById('avatar-name').textContent = 'не выбран';
+}
+
 document.getElementById('avatar-file').addEventListener('change', function () {
     const file = this.files[0];
     if (!file) return;
-    if (file.size > 200 * 1024) {
-        showJoinStatus('Аватар должен быть меньше 200 KB', true);
+    clearAvatar();
+    if (!validFile(file, 200 * 1024)) {
+        showJoinStatus('Выберите JPEG/PNG размером от 1 байта до 200 KiB', true);
         return;
     }
-    avatarMime = file.type;
+    const loadId = avatarLoadId;
+    avatarLoading = true;
     const reader = new FileReader();
-    reader.onload = function (e) {
-        avatarBytes = new Uint8Array(e.target.result);
+    reader.onload = function () {
+        if (loadId !== avatarLoadId) return;
+        avatarLoading = false;
+        avatarBytes = new Uint8Array(reader.result);
+        avatarMime = file.type;
         const preview = document.getElementById('avatar-preview');
-        preview.src = e.target.result;
+        preview.src = bytesToDataUrl(avatarBytes, avatarMime);
         preview.style.display = 'block';
         document.getElementById('avatar-name').textContent = file.name;
+    };
+    reader.onerror = function () {
+        if (loadId !== avatarLoadId) return;
+        clearAvatar();
+        showJoinStatus('Не удалось прочитать аватар', true);
     };
     reader.readAsArrayBuffer(file);
 });
 
-// Image attachment picker
 document.getElementById('image-file').addEventListener('change', function () {
     const file = this.files[0];
     if (!file) return;
-    if (file.size > 1024 * 1024) {
-        appendSystemMsg('Изображение должно быть меньше 1 МБ', 'error');
+    clearAttach();
+    if (!validFile(file, 1024 * 1024)) {
+        appendSystemMsg('Выберите JPEG/PNG размером от 1 байта до 1 MiB', 'error');
         return;
     }
-    imageMime = file.type;
+    const loadId = imageLoadId;
+    imageLoading = true;
     const reader = new FileReader();
-    reader.onload = function (e) {
-        imageBytes = new Uint8Array(e.target.result);
-        const thumb = document.getElementById('attach-thumb');
-        thumb.src = e.target.result;
-        const attachPreview = document.getElementById('attach-preview');
-        attachPreview.style.display = 'flex';
+    reader.onload = function () {
+        if (loadId !== imageLoadId) return;
+        imageLoading = false;
+        imageBytes = new Uint8Array(reader.result);
+        imageMime = file.type;
+        document.getElementById('attach-thumb').src = bytesToDataUrl(imageBytes, imageMime);
+        document.getElementById('attach-preview').style.display = 'flex';
         document.getElementById('attach-label').textContent = file.name;
     };
+    reader.onerror = function () {
+        if (loadId !== imageLoadId) return;
+        clearAttach();
+        appendSystemMsg('Не удалось прочитать изображение', 'error');
+    };
     reader.readAsArrayBuffer(file);
-    this.value = '';   // allow re-selecting same file
 });
 
 // ---------------------------------------------------------------------------
@@ -391,11 +425,15 @@ document.getElementById('image-file').addEventListener('change', function () {
 function startJoin() {
     const nameInput = document.getElementById('name-input');
     const name = nameInput.value.trim();
-    if (!name) {
-        showJoinStatus('Введите имя', true);
+    if (!validName(name)) {
+        showJoinStatus('Имя: 1–50 букв, цифр, _ или - без пробелов', true);
         return;
     }
 
+    if (avatarLoading) {
+        showJoinStatus('Дождитесь загрузки аватара', true);
+        return;
+    }
     myName           = name;
     pendingJoinPayload = { name, avatarBytes, avatarMime };
     cancelReconnect();
@@ -592,24 +630,7 @@ function onJoinError(error) {
 // ---------------------------------------------------------------------------
 function onNewMessage(broadcast) {
     if (!broadcast) return;
-    const ts = formatTime(broadcast.timestamp);
-
-    // Avatar thumbnail inline with sender name
-    let avatarHtml = '';
-    if (broadcast.sender_avatar && broadcast.sender_avatar.length > 0) {
-        const url = bytesToDataUrl(broadcast.sender_avatar, broadcast.sender_avatar_mime);
-        avatarHtml = `<img class="sender-avatar" src="${url}" alt="">`;
-    }
-
-    const displayText = broadcast.text || '(изображение)';
-    const imgBadge = (broadcast.has_image) ? ' 📷' : '';
-
-    const line = document.createElement('div');
-    line.className = 'msg-line';
-    line.innerHTML =
-        `<span class="sender-with-avatar">${avatarHtml}<span class="msg-sender">${escHtml(broadcast.sender_name)}</span></span>` +
-        ` [${ts}]: ${escHtml(displayText)}${imgBadge}`;
-    document.getElementById('messages-area').appendChild(line);
+    renderPublicLine(broadcast);
 
     if (broadcast.has_image && broadcast.image && broadcast.image.length > 0) {
         showImage(broadcast.image, broadcast.image_mime, broadcast.sender_name);
@@ -672,25 +693,10 @@ function onUserLeft(event) {
 // Render one history message
 // ---------------------------------------------------------------------------
 function renderHistoryMessage(h) {
-    const ts          = formatTime(h.timestamp);
-    const displayText = h.text || '(изображение)';
-    const imgBadge    = h.has_image ? ' 📷' : '';
-
     if (h.is_private) {
-        appendMsg(`${h.sender_name} [${ts}]: ${displayText}${imgBadge}`, 'private');
+        appendMsg(`${h.sender_name} [${formatTime(h.timestamp)}]: ${h.text || '(изображение)'}`, 'private');
     } else {
-        // Build inline avatar if present
-        let avatarHtml = '';
-        if (h.sender_avatar && h.sender_avatar.length > 0) {
-            const url = bytesToDataUrl(h.sender_avatar, h.sender_avatar_mime);
-            avatarHtml = `<img class="sender-avatar" src="${url}" alt="">`;
-        }
-        const line = document.createElement('div');
-        line.className = 'msg-line';
-        line.innerHTML =
-            `<span class="sender-with-avatar">${avatarHtml}<span class="msg-sender">${escHtml(h.sender_name)}</span></span>` +
-            ` [${ts}]: ${escHtml(displayText)}${imgBadge}`;
-        document.getElementById('messages-area').appendChild(line);
+        renderPublicLine(h);
     }
 
     if (h.has_image && h.image && h.image.length > 0) {
@@ -701,41 +707,44 @@ function renderHistoryMessage(h) {
 // ---------------------------------------------------------------------------
 // SEND MESSAGE
 // ---------------------------------------------------------------------------
+function validName(name) {
+    return Array.from(name).length >= 1 && Array.from(name).length <= 50 && /^[\p{L}\p{Nd}_-]+$/u.test(name);
+}
+
+function parseMessage(value) {
+    const match = value.match(/^@(\S+)(?:\s([\s\S]*))?$/u);
+    return match ? { target: match[1], text: match[2] || '' } : { target: null, text: value };
+}
+
 function sendMessage() {
     const input = document.getElementById('message-input');
-    const text  = input.value.trim();
-    if (!text && !imageBytes) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-    // Detect private message: @name text
-    const privateMatch = text.match(/^@(\S+)\s+([\s\S]*)$/);
-
-    if (privateMatch) {
-        const targetName = privateMatch[1];
-        const pmText     = privateMatch[2].substring(0, 25);
-
-        const msg = ClientRequest.create({
-            type: 2,  // PRIVATE_CHAT
-            private_chat: {
-                target_name: targetName,
-                text:        pmText,
-                image:       imageBytes ? imageBytes : null,
-                image_mime:  imageBytes ? imageMime  : ''
-            }
-        });
-        sendProto(msg);
-    } else {
-        const msg = ClientRequest.create({
-            type: 1,  // CHAT
-            chat: {
-                text:       text.substring(0, 25),
-                image:      imageBytes ? imageBytes : null,
-                image_mime: imageBytes ? imageMime  : ''
-            }
-        });
-        sendProto(msg);
+    if (!joined || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (imageLoading) {
+        appendSystemMsg('Дождитесь загрузки изображения', 'error');
+        return;
     }
-
+    const { target, text } = parseMessage(input.value);
+    if (target && !validName(target)) {
+        appendSystemMsg('Некорректное имя получателя', 'error');
+        return;
+    }
+    if (Array.from(text).length > 25) {
+        appendSystemMsg('Текст сообщения должен содержать не более 25 символов', 'error');
+        return;
+    }
+    if (!text.trim() && !imageBytes) {
+        appendSystemMsg('Добавьте текст или изображение', 'error');
+        return;
+    }
+    const payload = {
+        text,
+        image: imageBytes || null,
+        image_mime: imageBytes ? imageMime : ''
+    };
+    const msg = ClientRequest.create(target
+        ? { type: 2, private_chat: { ...payload, target_name: target } }
+        : { type: 1, chat: payload });
+    if (!sendProto(msg)) return;
     input.value = '';
     onInputChange();
     clearAttach();
@@ -747,11 +756,14 @@ function sendMessage() {
 function sendProto(message) {
     try {
         const err = ClientRequest.verify(message);
-        if (err) { console.error('Proto verify:', err); return; }
+        if (err) throw new Error(err);
         const buf = ClientRequest.encode(message).finish();
         ws.send(buf);
+        return true;
     } catch (e) {
         console.error('Send error:', e);
+        appendSystemMsg('Не удалось отправить сообщение', 'error');
+        return false;
     }
 }
 
@@ -760,7 +772,7 @@ function sendProto(message) {
 // ---------------------------------------------------------------------------
 function onInputChange() {
     const v = document.getElementById('message-input').value;
-    document.getElementById('char-count').textContent = `${v.length}/25`;
+    document.getElementById('char-count').textContent = `${Array.from(parseMessage(v).text).length}/25`;
 }
 
 function onInputKey(e) {
@@ -768,20 +780,50 @@ function onInputKey(e) {
 }
 
 function clearAttach() {
+    imageLoadId++;
+    imageLoading = false;
+    document.getElementById('attach-thumb').removeAttribute('src');
     imageBytes = null;
     imageMime  = '';
     document.getElementById('attach-preview').style.display = 'none';
     document.getElementById('image-file').value = '';
 }
 
+function renderPublicLine(message) {
+    const line = document.createElement('div');
+    line.className = 'msg-line';
+    const sender = document.createElement('span');
+    sender.className = 'sender-with-avatar';
+    if (message.sender_avatar && message.sender_avatar.length) {
+        const url = bytesToDataUrl(message.sender_avatar, message.sender_avatar_mime);
+        if (url) {
+            const avatar = document.createElement('img');
+            avatar.className = 'sender-avatar';
+            avatar.alt = '';
+            avatar.src = url;
+            sender.appendChild(avatar);
+        }
+    }
+    const name = document.createElement('span');
+    name.className = 'msg-sender';
+    name.textContent = message.sender_name;
+    sender.appendChild(name);
+    line.appendChild(sender);
+    line.appendChild(document.createTextNode(` [${formatTime(message.timestamp)}]: ${message.text || '(изображение)'}${message.has_image ? ' 📷' : ''}`));
+    document.getElementById('messages-area').appendChild(line);
+}
+
 function showImage(imgBytes, mime, sender) {
-    const url   = bytesToDataUrl(imgBytes, mime);
-    const area  = document.getElementById('messages-area');
+    const url = bytesToDataUrl(imgBytes, mime);
+    if (!url) return;
     const block = document.createElement('div');
     block.className = 'chat-image-block';
-    block.innerHTML =
-        `<img src="${url}" alt="image" onclick="openLightbox(this.src)">`;
-    area.appendChild(block);
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = `Изображение от ${sender}`;
+    img.addEventListener('click', () => openLightbox(img.src));
+    block.appendChild(img);
+    document.getElementById('messages-area').appendChild(block);
 }
 
 function openLightbox(src) {
@@ -806,7 +848,7 @@ function appendSystemMsg(text, cls) {
 }
 
 function clearMessages() {
-    document.getElementById('messages-area').innerHTML = '';
+    document.getElementById('messages-area').replaceChildren();
 }
 
 function scrollToBottom() {
@@ -845,6 +887,7 @@ function showJoinStatus(msg, isError) {
 // Utility
 // ---------------------------------------------------------------------------
 function bytesToDataUrl(bytes, mime) {
+    if (!['image/png', 'image/jpeg'].includes(mime)) return null;
     // bytes may be a Uint8Array or a Long-keyed object from protobufjs
     let arr = bytes;
     if (!(arr instanceof Uint8Array)) {
@@ -863,15 +906,6 @@ function formatTime(ts) {
     if (!ms) return '';
     const d = new Date(ms);
     return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function escHtml(str) {
-    if (!str) return '';
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
 }
 
 // Close lightbox on background click

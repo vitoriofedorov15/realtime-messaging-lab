@@ -21,3 +21,11 @@ These are tracked findings, not completed improvements. Runtime verification is 
 The current implementation does not authenticate a person's identity, provide offline private delivery or establish a measured capacity of 100 concurrent users. The constant limiting joined users is not a load-test result.
 
 Dependencies have not yet undergone a vulnerability audit. No performance or reliability improvement is claimed at this stage.
+
+## Stage 1 status (2026-11-13)
+
+The table above preserves the original findings. B01–B06 and B12 are now addressed: repeated JOIN, server-side text/file checks, self-PM duplication, previews, safe DOM rendering and removal of PM bodies from logs. See `stage-1.md` for verification scope.
+
+B11 is partially addressed: departed users' avatar caches are removed (history has its own copy). Slow-client backpressure is still outstanding. B13 is partially addressed: 13 JUnit tests and a server smoke probe exist, and the UI was manually checked in the in-app browser. An automated browser runner, CI, wrapper and containers remain outstanding.
+
+B07–B10 remain open. The server still writes history synchronously, sends it in a single JOIN response and lacks end-to-end delivery acknowledgements. Header checks are not full image sanitization. No load-test or dependency-security claims are made.

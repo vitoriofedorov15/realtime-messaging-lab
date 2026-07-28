@@ -4,11 +4,6 @@ import com.chat.proto.ChatProto;
 import com.google.protobuf.ByteString;
 
 
-
-
-
-
-
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -30,7 +25,13 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<BinaryWebSocke
         byte[] bytes = new byte[frame.content().readableBytes()];
         frame.content().readBytes(bytes);
 
-        ChatProto.ClientRequest request = ChatProto.ClientRequest.parseFrom(bytes);
+        ChatProto.ClientRequest request;
+        try {
+            request = ChatProto.ClientRequest.parseFrom(bytes);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+            sendError(ctx.channel(), 400, "Invalid Protobuf message");
+            return;
+        }
 
         switch (request.getType()) {
             case JOIN         -> handleJoin(ctx, request);
@@ -52,8 +53,18 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<BinaryWebSocke
         ChatProto.JoinRequest joinReq = request.getJoin();
         String name = joinReq.getName().trim();
 
-        if (name.isEmpty() || name.length() > 50) {
-            sendError(ctx.channel(), 400, "Name must be 1–50 characters");
+        if (chatRoom.getUserName(ctx.channel()) != null) {
+            sendError(ctx.channel(), 409, "ALREADY_JOINED: this connection has already joined");
+            return;
+        }
+        try {
+            InputValidation.name(name);
+            if (joinReq.hasAvatar()) {
+                InputValidation.image(joinReq.getAvatar().toByteArray(), joinReq.getAvatarMime(),
+                        InputValidation.MAX_AVATAR_BYTES);
+            }
+        } catch (IllegalArgumentException e) {
+            sendJoinError(ctx.channel(), 400, e.getMessage());
             return;
         }
 
@@ -67,6 +78,10 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<BinaryWebSocke
 
         ChatRoom.JoinResult result = chatRoom.join(ctx.channel(), name, avatar, avatarMime);
 
+        if (result == ChatRoom.JoinResult.ALREADY_JOINED) {
+            sendError(ctx.channel(), 409, "ALREADY_JOINED: this connection has already joined");
+            return;
+        }
         if (result == ChatRoom.JoinResult.NAME_TAKEN) {
             sendJoinError(ctx.channel(), 409, "Name '" + name + "' is already taken");
             return;
@@ -123,8 +138,15 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<BinaryWebSocke
 
         ChatProto.ChatRequest chatReq = request.getChat();
         String text = chatReq.getText();
-        if (text.length() > 25) {
-            text = text.substring(0, 25);
+        try {
+            InputValidation.message(text, chatReq.hasImage() && !chatReq.getImage().isEmpty());
+            if (chatReq.hasImage()) {
+                InputValidation.image(chatReq.getImage().toByteArray(), chatReq.getImageMime(),
+                        InputValidation.MAX_IMAGE_BYTES);
+            }
+        } catch (IllegalArgumentException e) {
+            sendError(ctx.channel(), 400, e.getMessage());
+            return;
         }
 
         long timestamp = System.currentTimeMillis();
@@ -197,8 +219,20 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<BinaryWebSocke
         ChatProto.PrivateChatRequest privateReq = request.getPrivateChat();
         String targetName = privateReq.getTargetName().trim();
 
+        try {
+            InputValidation.name(targetName);
+            InputValidation.message(privateReq.getText(), privateReq.hasImage() && !privateReq.getImage().isEmpty());
+            if (privateReq.hasImage()) {
+                InputValidation.image(privateReq.getImage().toByteArray(), privateReq.getImageMime(),
+                        InputValidation.MAX_IMAGE_BYTES);
+            }
+        } catch (IllegalArgumentException e) {
+            sendError(ctx.channel(), 400, e.getMessage());
+            return;
+        }
+
         Channel targetChannel = chatRoom.getChannelByName(targetName);
-        if (targetChannel == null) {
+        if (targetChannel == null || !targetChannel.isActive()) {
             sendError(ctx.channel(), 404, "User '" + targetName + "' is not in the chat");
             return;
         }
@@ -227,10 +261,12 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<BinaryWebSocke
 
 
         sendResponse(targetChannel, serverResponse);
-        sendResponse(ctx.channel(), serverResponse);
+        if (targetChannel != ctx.channel()) {
+            sendResponse(ctx.channel(), serverResponse);
+        }
 
         // Private messages are NOT stored in shared history — visible only to the two participants
-        System.out.printf("[PM] %s -> %s: %s%n", senderName, targetName, privateReq.getText());
+        System.out.printf("[PM] %s -> %s%n", senderName, targetName);
     }
 
     // ------------------------------------------------------------------ lifecycle

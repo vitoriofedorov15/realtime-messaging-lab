@@ -23,7 +23,7 @@ public class ChatRoom {
     private static final int    MAX_USERS    = 100;
     private static final int    MAX_HISTORY  = 50;
     private static final int    MAX_IMAGES   = 50;
-    private static final String HISTORY_FILE = "chat_history.bin";
+    private final File historyFile;
 
     // channel -> username
     private final Map<Channel, String> channelToName   = new ConcurrentHashMap<>();
@@ -40,6 +40,11 @@ public class ChatRoom {
     private String lastImageMime = "";
 
     public ChatRoom() {
+        this(new File("chat_history.bin"));
+    }
+
+    public ChatRoom(File historyFile) {
+        this.historyFile = Objects.requireNonNull(historyFile);
         loadHistory();
     }
 
@@ -47,6 +52,9 @@ public class ChatRoom {
 
     public synchronized JoinResult join(Channel channel, String name,
                                         byte[] avatar, String avatarMime) {
+        if (channelToName.containsKey(channel)) {
+            return JoinResult.ALREADY_JOINED;
+        }
         if (nameToChannel.containsKey(name)) {
             return JoinResult.NAME_TAKEN;
         }
@@ -68,8 +76,10 @@ public class ChatRoom {
     public synchronized void leave(Channel channel) {
         String name = channelToName.remove(channel);
         if (name != null) {
-            nameToChannel.remove(name);
-            // keep avatar in memory so history images still resolve
+            nameToChannel.remove(name, channel);
+            // History messages already contain their own avatar bytes.
+            userAvatars.remove(name);
+            userAvatarMimes.remove(name);
         }
     }
 
@@ -151,7 +161,7 @@ public class ChatRoom {
      * Each HistoryMessage is prefixed with a varint length, so we can read until EOF.
      */
     private void loadHistory() {
-        File file = new File(HISTORY_FILE);
+        File file = historyFile;
         if (!file.exists()) return;
 
         try (FileInputStream fis = new FileInputStream(file)) {
@@ -165,7 +175,7 @@ public class ChatRoom {
                 }
             }
             System.out.printf("[HISTORY] Loaded %d messages from %s%n",
-                    history.size(), HISTORY_FILE);
+                    history.size(), historyFile);
         } catch (IOException e) {
             System.err.println("[HISTORY] Failed to load history: " + e.getMessage());
         }
@@ -176,7 +186,7 @@ public class ChatRoom {
      * Uses protobuf's writeDelimitedTo — each message is prefixed with its length.
      */
     private void saveHistory() {
-        try (FileOutputStream fos = new FileOutputStream(HISTORY_FILE)) {
+        try (FileOutputStream fos = new FileOutputStream(historyFile)) {
             for (ChatProto.HistoryMessage msg : history) {
                 msg.writeDelimitedTo(fos);
             }
@@ -187,5 +197,5 @@ public class ChatRoom {
 
     // ------------------------------------------------------------------ enum
 
-    public enum JoinResult { OK, NAME_TAKEN, ROOM_FULL }
+    public enum JoinResult { OK, ALREADY_JOINED, NAME_TAKEN, ROOM_FULL }
 }

@@ -10,7 +10,7 @@ import java.time.Duration;
 import java.util.concurrent.*;
 import java.util.function.Predicate;
 
-/** Stage-0 probe, deliberately separate from the future regression test suite. */
+/** Real WebSocket smoke probe, complementing the JUnit regression suite. */
 public class BaselineSmoke {
     static final String JAVA = Path.of(System.getProperty("java.home"), "bin", "java").toString();
     static Process server;
@@ -126,14 +126,18 @@ public class BaselineSmoke {
                 check(restored.getHistoryCount() == 2, "Two public messages survive restart; PM absent");
                 check(restored.getHistory(0).getText().equals("baseline hello"), "Restored history content matches");
             }
-            // Isolated state probe documents the known defect; it must change during stage 1.
+            // Regression: repeated JOIN must preserve the existing registration.
             ChatRoom room = new ChatRoom();
             EmbeddedChannel channel = new EmbeddedChannel();
             try {
-                room.join(channel,"OldName",null,""); room.join(channel,"NewName",null,""); room.leave(channel);
-                check(room.getActiveUserCount() == 0 && room.isUserOnline("OldName"), "KNOWN DEFECT reproduced: repeated JOIN leaves stale name");
+                room.join(channel,"OldName",null,"");
+                check(room.join(channel,"NewName",null,"") == ChatRoom.JoinResult.ALREADY_JOINED, "Repeated JOIN rejected");
+                check("OldName".equals(room.getUserName(channel)), "Original name preserved");
+                room.leave(channel);
+                check(room.getActiveUserCount() == 0 && !room.isUserOnline("OldName"), "Disconnect releases original name");
             } finally { channel.finishAndReleaseAll(); }
-            System.out.println("BASELINE SMOKE PASSED (including one expected known defect)");
+            check(!Files.readString(directory.resolve("server.log")).contains("private hello"), "Private message body absent from server log");
+            System.out.println("WEBSOCKET SMOKE PASSED");
         } finally { stop(); }
     }
 }
