@@ -2,7 +2,9 @@
 
 A coursework WebSocket chat built with Java, Netty and Protocol Buffers, being developed into a reproducible engineering portfolio project.
 
-**Status: stage 1 — input validation and correctness fixes.** Registration, private-message edge cases and image previews are fixed, with regression tests. Persistence, protocol synchronization and production hardening remain planned. This is not a production service.
+**Status: stage 2 — versioned protocol and ordered history synchronization.** Registration and validation fixes are covered by regression tests; both clients use one canonical schema. Persistence hardening is the next stage. This is not a production service.
+
+See the [protocol contract](docs/protocol.md), [stage 2 verification](docs/stage-2.md) and [known issues](docs/known-issues.md). Earlier reports: [stage 1](docs/stage-1.md), [source baseline](docs/baseline.md).
 
 ## Current implementation
 
@@ -15,15 +17,24 @@ See [stage 1 verification](docs/stage-1.md), the historical [baseline](docs/base
 
 ## Build
 
-Requirements: JDK 17 and Maven (verified with JDK 17.0.19 and Maven 3.9.12). Set `JAVA_HOME` to your JDK 17 installation if another Java version is the default. A first build needs access to Maven Central; subsequent builds can use a populated local Maven cache.
+Requirements: JDK 17, Maven and Node.js 22+ with npm (verified with JDK 17.0.19, Maven 3.9.12 and Node 24.3.0). Set `JAVA_HOME` to JDK 17 when another version is the default. A first build downloads dependencies from Maven Central and npm.
 
 From the repository root:
 
 ```sh
-mvn -f server/pom.xml clean package
+sh scripts/build.sh
 ```
 
-This generates Java protocol classes from `server/src/main/proto/chat.proto` and builds the executable JAR. No prebuilt JAR is committed. The build runs 13 JUnit regression tests. To run only these checks: `mvn -f server/pom.xml test`.
+This uses `npm ci`, generates local browser assets from `protocol/chat.proto`, runs 7 Node tests, then builds the server and runs 21 JUnit tests. Generated assets and JARs are not committed. Maven options can be appended to the script command.
+
+Individual steps:
+
+```sh
+npm ci --prefix client --ignore-scripts
+npm run build --prefix client
+npm test --prefix client
+mvn -f server/pom.xml clean package
+```
 
 ## Run locally
 
@@ -35,7 +46,7 @@ cd runtime
 java -jar ../server/target/chat-server-1.0-SNAPSHOT-jar-with-dependencies.jar
 ```
 
-Open `client/index.html` in a browser, enter a name and join. Open another tab with a different name to exchange messages. The browser currently loads protobuf.js from a CDN, so browser startup requires internet access.
+Open `client/index.html` in a browser, enter a name and join. Open another tab with a different name to exchange messages. After the build, all browser scripts are local; no CDN connection is needed. Reload existing tabs after rebuilding the protocol. The original coursework client is incompatible with v2 and receives a version error.
 
 - WebSocket endpoint: `ws://localhost:8080/ws` (currently hardcoded).
 - Stop the server with Ctrl+C.
@@ -48,18 +59,19 @@ Stop any server using port 8080 first, then run from the repository root:
 
 ```sh
 sh scripts/smoke-baseline.sh
+node scripts/protocol-smoke.cjs
 ```
 
 This compiles a standalone Java probe, launches the freshly built server, connects real WebSocket clients and checks public/private messaging and history after a restart. It uses synthetic messages in a temporary directory; that directory is printed and retained with its server log for inspection. Probe classes are removed automatically. Only the server process created by the probe is stopped.
 
 The historical script name is retained, but its expectations now verify that repeated JOIN is rejected and the original name is released on disconnect. It also checks that private-message text is absent from the server log.
 
-This is a server smoke check, not a browser UI test or load test. The PM isolation check covers a short observed scenario, not every possible concurrent interleaving.
+The JavaScript integration additionally exercises byte-bounded large history and three concurrent JOINs during live traffic. These are protocol checks, not browser UI or load tests. The PM isolation check covers a short observed scenario, not every possible concurrent interleaving.
 
 ## Next steps
 
 1. Completed: registration, validation, private-message edge cases and previews, with regression tests.
-2. Consolidate the protocol and synchronize history and live messages.
+2. Completed: canonical versioned protocol, bounded history transfer and ordered live synchronization.
 3. Improve persistence and bounded resource handling.
 4. Improve the interface and reconnection behavior.
 5. Add reproducible packaging and CI.

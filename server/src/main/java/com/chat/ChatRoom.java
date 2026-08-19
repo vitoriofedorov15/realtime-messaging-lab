@@ -38,6 +38,8 @@ public class ChatRoom {
     private int    imageCount   = 0;
     private byte[] lastImage    = null;
     private String lastImageMime = "";
+    private String lastImageId = "";
+    private long sequence = 0;
 
     public ChatRoom() {
         this(new File("chat_history.bin"));
@@ -119,7 +121,9 @@ public class ChatRoom {
         return new ArrayList<>(history);
     }
 
-    public synchronized void addToHistory(ChatProto.HistoryMessage message) {
+    public synchronized ChatProto.HistoryMessage addToHistory(ChatProto.HistoryMessage message) {
+        message = message.toBuilder().setMessageId(UUID.randomUUID().toString())
+                .setSequence(++sequence).build();
         if (message.getHasImage() && imageCount >= MAX_IMAGES) {
             // Remove the oldest message that carries an image
             for (int i = 0; i < history.size(); i++) {
@@ -141,9 +145,17 @@ public class ChatRoom {
             imageCount++;
             lastImage    = message.getImage().toByteArray();
             lastImageMime = message.getImageMime();
+            lastImageId = message.getMessageId();
         }
 
         saveHistory();
+        return message;
+    }
+
+    public synchronized long getSequence() { return sequence; }
+    public synchronized String getLastImageId() { return lastImageId; }
+    public synchronized List<String> getUsers() {
+        return nameToChannel.keySet().stream().sorted().toList();
     }
 
     public byte[] getLastImage() {
@@ -167,11 +179,18 @@ public class ChatRoom {
         try (FileInputStream fis = new FileInputStream(file)) {
             ChatProto.HistoryMessage msg;
             while ((msg = ChatProto.HistoryMessage.parseDelimitedFrom(fis)) != null) {
+                // Upgrade the original delimited history in memory; persist on next write.
+                if (msg.getMessageId().isEmpty() || msg.getSequence() <= sequence) {
+                    msg = msg.toBuilder().setMessageId(UUID.randomUUID().toString())
+                            .setSequence(sequence + 1).build();
+                }
+                sequence = msg.getSequence();
                 history.add(msg);
                 if (msg.getHasImage()) {
                     imageCount++;
                     lastImage    = msg.getImage().toByteArray();
                     lastImageMime = msg.getImageMime();
+                    lastImageId = msg.getMessageId();
                 }
             }
             System.out.printf("[HISTORY] Loaded %d messages from %s%n",

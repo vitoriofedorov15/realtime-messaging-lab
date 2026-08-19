@@ -18,9 +18,13 @@ message ClientRequest {
 
   RequestType type = 1;
 
-  optional JoinRequest        join         = 2;
-  optional ChatRequest        chat         = 3;
-  optional PrivateChatRequest private_chat = 4;
+  oneof payload {
+    JoinRequest join = 2;
+    ChatRequest chat = 3;
+    PrivateChatRequest private_chat = 4;
+  }
+  uint32 protocol_version = 100;
+  string request_id = 101;
 }
 
 
@@ -58,23 +62,29 @@ message ServerResponse {
     ERROR           = 4;
     USER_JOINED     = 5;
     USER_LEFT       = 6;
+    HISTORY_BATCH   = 7;
   }
 
   ResponseType type = 1;
 
-  optional JoinSuccessResponse join_success  = 2;
-  optional ErrorResponse       error         = 3;
-  optional BroadcastMessage    broadcast     = 4;
-  optional PrivateMessage      private_msg   = 5;
-  optional UserEvent           user_event    = 6;
+  oneof payload {
+    JoinSuccessResponse join_success = 2;
+    ErrorResponse error = 3;
+    BroadcastMessage broadcast = 4;
+    PrivateMessage private_msg = 5;
+    UserEvent user_event = 6;
+    HistoryBatch history_batch = 7;
+  }
+  uint32 protocol_version = 100;
+  string request_id = 101;
 }
 
 
 message JoinSuccessResponse {
-  repeated HistoryMessage history        = 1;
-  optional bytes          last_image     = 2;
-  string                  last_image_mime = 3;
-  int32                   active_users   = 4;
+  reserved 1, 2, 3; // Old single-response history is intentionally incompatible.
+  int32 active_users = 4;
+  repeated string users = 5;
+  uint64 snapshot_sequence = 6;
 }
 
 
@@ -88,6 +98,8 @@ message HistoryMessage {
   bool           is_private        = 7;
   optional bytes sender_avatar     = 8;
   string         sender_avatar_mime = 9;
+  string message_id = 10;
+  uint64 sequence = 11;
 }
 
 
@@ -100,6 +112,8 @@ message BroadcastMessage {
   string         image_mime       = 6;
   optional bytes sender_avatar    = 7;
   string         sender_avatar_mime = 8;
+  string message_id = 9;
+  uint64 sequence = 10;
 }
 
 
@@ -110,6 +124,8 @@ message PrivateMessage {
   bool           has_image   = 4;
   optional bytes image       = 5;
   string         image_mime  = 6;
+  string message_id = 7;
+  string target_name = 8;
 }
 
 
@@ -123,4 +139,15 @@ message UserEvent {
 message ErrorResponse {
   int32  error_code    = 1;
   string error_message = 2;
+  string code = 3;
+}
+
+// All batches correlate to JOIN. Live events follow the final batch.
+message HistoryBatch {
+  repeated HistoryMessage history = 1;
+  uint64 snapshot_sequence = 2;
+  bool complete = 3;
+  optional bytes last_image = 4;
+  string last_image_mime = 5;
+  string last_image_message_id = 6;
 }

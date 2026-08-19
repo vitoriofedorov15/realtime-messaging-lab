@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebSocket Chat — HW5</title>
 
-    <!-- protobuf.js from CDN (handles proto3 encoding/decoding in pure JS) -->
-    <script src="https://cdn.jsdelivr.net/npm/protobufjs@7.2.5/dist/protobuf.min.js"></script>
+    <!-- Generated from the canonical protocol during npm run build. -->
+    <script src="generated/protobuf.min.js"></script>
+    <script src="generated/protocol.js"></script>
+    <script src="protocol-state.js"></script>
 
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -186,6 +188,7 @@
     </div>
 
     <div id="conn-status" class="conn-ok">Подключено</div>
+    <div id="participants" aria-live="polite"></div>
 
     <div id="messages-area"></div>
 
@@ -222,91 +225,7 @@
 // ---------------------------------------------------------------------------
 // Proto3 schema — parsed at runtime by protobuf.js
 // ---------------------------------------------------------------------------
-const PROTO_SCHEMA = `
-syntax = "proto3";
-package chat;
-
-message ClientRequest {
-  enum RequestType { JOIN = 0; CHAT = 1; PRIVATE_CHAT = 2; }
-  RequestType type = 1;
-  optional JoinRequest join = 2;
-  optional ChatRequest chat = 3;
-  optional PrivateChatRequest private_chat = 4;
-}
-message JoinRequest {
-  string name = 1;
-  optional bytes avatar = 2;
-  string avatar_mime = 3;
-}
-message ChatRequest {
-  string text = 1;
-  optional bytes image = 2;
-  string image_mime = 3;
-}
-message PrivateChatRequest {
-  string target_name = 1;
-  string text = 2;
-  optional bytes image = 3;
-  string image_mime = 4;
-}
-
-message ServerResponse {
-  enum ResponseType {
-    JOIN_SUCCESS = 0; JOIN_ERROR = 1; NEW_MESSAGE = 2;
-    PRIVATE_MESSAGE = 3; ERROR = 4; USER_JOINED = 5; USER_LEFT = 6;
-  }
-  ResponseType type = 1;
-  optional JoinSuccessResponse join_success = 2;
-  optional ErrorResponse error = 3;
-  optional BroadcastMessage broadcast = 4;
-  optional PrivateMessage private_msg = 5;
-  optional UserEvent user_event = 6;
-}
-message JoinSuccessResponse {
-  repeated HistoryMessage history = 1;
-  optional bytes last_image = 2;
-  string last_image_mime = 3;
-  int32 active_users = 4;
-}
-message HistoryMessage {
-  string sender_name = 1;
-  string text = 2;
-  int64 timestamp = 3;
-  bool has_image = 4;
-  optional bytes image = 5;
-  string image_mime = 6;
-  bool is_private = 7;
-  optional bytes sender_avatar = 8;
-  string sender_avatar_mime = 9;
-}
-message BroadcastMessage {
-  string sender_name = 1;
-  string text = 2;
-  int64 timestamp = 3;
-  bool has_image = 4;
-  optional bytes image = 5;
-  string image_mime = 6;
-  optional bytes sender_avatar = 7;
-  string sender_avatar_mime = 8;
-}
-message PrivateMessage {
-  string sender_name = 1;
-  string text = 2;
-  int64 timestamp = 3;
-  bool has_image = 4;
-  optional bytes image = 5;
-  string image_mime = 6;
-}
-message UserEvent {
-  string user_name = 1;
-  bool joined = 2;
-  int32 active_users = 3;
-}
-message ErrorResponse {
-  int32 error_code = 1;
-  string error_message = 2;
-}
-`;
+const PROTO_SCHEMA = window.CHAT_PROTO_SCHEMA;
 
 // ---------------------------------------------------------------------------
 // Global state
@@ -319,6 +238,10 @@ let avatarMime   = '';
 let imageBytes   = null;   // attachment for next message
 let imageMime    = '';
 let joined       = false;
+const protocolState = new ProtocolState();
+let joinRequestId = '';
+let requestCounter = 0;
+const pendingRequests = new Map();
 let avatarLoadId = 0, imageLoadId = 0;
 let avatarLoading = false, imageLoading = false;
 let joinErrorOccurred = false;   // prevents reconnect timer on name-conflict errors
@@ -463,6 +386,9 @@ function connect() {
         };
 
         ws.onclose = function () {
+            protocolState.ready = false;
+            if (pendingRequests.size) appendSystemMsg('Соединение потеряно: статус неподтверждённых запросов неизвестен', 'error');
+            pendingRequests.clear();
             // JOIN_ERROR closes the socket intentionally — don't trigger reconnect
             if (joinErrorOccurred) {
                 joinErrorOccurred = false;
@@ -491,7 +417,7 @@ function sendJoinRequest(payload) {
             avatar_mime: payload.avatarBytes ? payload.avatarMime  : ''
         }
     });
-    sendProto(msg);
+    joinRequestId = sendProto(msg) || '';
 }
 
 // ---------------------------------------------------------------------------
@@ -553,10 +479,15 @@ function handleServerMessage(data) {
         return;
     }
 
-    const RT = ServerResponse.ResponseType || ServerResponse.values;
-
+    if (resp.protocol_version !== 2) {
+        onJoinError({error_message: 'Несовместимая версия протокола сервера'});
+        return;
+    }
+    if (resp.request_id && resp.type !== 0 && resp.type !== 7) pendingRequests.delete(resp.request_id);
+    try {
     switch (resp.type) {
         case 0: // JOIN_SUCCESS
+            if (resp.request_id !== joinRequestId) throw new Error('Unexpected JOIN response');
             onJoinSuccess(resp.join_success);
             break;
         case 1: // JOIN_ERROR
@@ -577,40 +508,50 @@ function handleServerMessage(data) {
         case 6: // USER_LEFT
             onUserLeft(resp.user_event);
             break;
+        case 7: // HISTORY_BATCH
+            if (resp.request_id !== joinRequestId) throw new Error('Unexpected history response');
+            onHistoryBatch(resp.history_batch);
+            break;
+    }
+    } catch (error) {
+        appendSystemMsg('Ошибка синхронизации: ' + error.message, 'error');
+        setControlsEnabled(false);
+        ws.close();
     }
 }
 
 // ---------------------------------------------------------------------------
 // JOIN SUCCESS
 // ---------------------------------------------------------------------------
+function renderParticipants() {
+    document.getElementById('participants').textContent = 'Участники: ' + [...protocolState.users].sort().join(', ');
+}
+
 function onJoinSuccess(payload) {
     joined = true;
-
-    // Hide join panel, show chat panel
+    protocolState.start(payload.snapshot_sequence, payload.users || []);
     document.getElementById('join-panel').style.display = 'none';
-    const chatPanel = document.getElementById('chat-panel');
-    chatPanel.style.display = 'block';
-
+    document.getElementById('chat-panel').style.display = 'block';
     document.getElementById('my-name-display').textContent = myName;
-    updateConnStatus('Подключено', 'conn-ok');
-    setControlsEnabled(true);
-
+    updateConnStatus('Загрузка истории…', 'conn-ok');
+    setControlsEnabled(false);
     updateOnlineCount(payload.active_users);
-
-    // Render history
+    renderParticipants();
     clearMessages();
-    if (payload.history && payload.history.length > 0) {
-        appendSystemMsg(`── История (${payload.history.length} сообщений) ──`, 'system');
-        for (const h of payload.history) {
-            renderHistoryMessage(h);
+}
+
+function onHistoryBatch(batch) {
+    for (const message of protocolState.history(batch)) renderHistoryMessage(message);
+    if (batch.complete) {
+        if (batch.last_image && batch.last_image.length && !protocolState.seen.has(batch.last_image_message_id)) {
+            appendSystemMsg('Последнее общее изображение', 'system');
+            showImage(batch.last_image, batch.last_image_mime, 'история');
         }
-        appendSystemMsg('── Конец истории ──', 'system');
-    } else {
-        appendSystemMsg('Чат пуст. Будьте первым!', 'system');
+        pendingRequests.delete(joinRequestId);
+        updateConnStatus('Подключено', 'conn-ok');
+        setControlsEnabled(true);
+        appendSystemMsg('── История загружена ──', 'system');
     }
-
-    // last_image is already included in history entries — no separate display to avoid duplicates
-
     scrollToBottom();
 }
 
@@ -629,7 +570,7 @@ function onJoinError(error) {
 // NEW MESSAGE (broadcast)
 // ---------------------------------------------------------------------------
 function onNewMessage(broadcast) {
-    if (!broadcast) return;
+    if (!broadcast || !protocolState.live(broadcast)) return;
     renderPublicLine(broadcast);
 
     if (broadcast.has_image && broadcast.image && broadcast.image.length > 0) {
@@ -643,11 +584,11 @@ function onNewMessage(broadcast) {
 // PRIVATE MESSAGE
 // ---------------------------------------------------------------------------
 function onPrivateMessage(pm) {
-    if (!pm) return;
+    if (!pm || !protocolState.remember(pm.message_id)) return;
     const ts = formatTime(pm.timestamp);
     const isMine = (pm.sender_name === myName);
     const label  = isMine
-        ? `[Вы → приватно] [${ts}]: ${pm.text}`
+        ? `[Вы → ${pm.target_name}] [${ts}]: ${pm.text}`
         : `[Личное от ${pm.sender_name}] [${ts}]: ${pm.text}`;
 
     appendMsg(label, 'private');
@@ -663,6 +604,7 @@ function onPrivateMessage(pm) {
 // ERROR
 // ---------------------------------------------------------------------------
 function onError(error) {
+    if (error?.code === 'UNSUPPORTED_VERSION') { onJoinError(error); return; }
     const msg = error ? `Ошибка ${error.error_code}: ${error.error_message}` : 'Неизвестная ошибка';
     if (joined) {
         appendMsg(msg, 'error');
@@ -677,6 +619,8 @@ function onError(error) {
 // ---------------------------------------------------------------------------
 function onUserJoined(event) {
     if (!event) return;
+    protocolState.users.add(event.user_name);
+    renderParticipants();
     appendSystemMsg(`→ ${event.user_name} присоединился. Online: ${event.active_users}`, 'system');
     updateOnlineCount(event.active_users);
     scrollToBottom();
@@ -684,6 +628,8 @@ function onUserJoined(event) {
 
 function onUserLeft(event) {
     if (!event) return;
+    protocolState.users.delete(event.user_name);
+    renderParticipants();
     appendSystemMsg(`← ${event.user_name} покинул чат. Online: ${event.active_users}`, 'system');
     updateOnlineCount(event.active_users);
     scrollToBottom();
@@ -718,7 +664,7 @@ function parseMessage(value) {
 
 function sendMessage() {
     const input = document.getElementById('message-input');
-    if (!joined || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!joined || !protocolState.ready || !ws || ws.readyState !== WebSocket.OPEN) return;
     if (imageLoading) {
         appendSystemMsg('Дождитесь загрузки изображения', 'error');
         return;
@@ -755,11 +701,16 @@ function sendMessage() {
 // ---------------------------------------------------------------------------
 function sendProto(message) {
     try {
+        message.protocol_version = 2;
+        message.request_id = 'r_' + (++requestCounter);
         const err = ClientRequest.verify(message);
         if (err) throw new Error(err);
         const buf = ClientRequest.encode(message).finish();
         ws.send(buf);
-        return true;
+        pendingRequests.set(message.request_id, message.type);
+        // This is correlation, not a retry queue or a claim of durable delivery.
+        if (pendingRequests.size > 256) pendingRequests.delete(pendingRequests.keys().next().value);
+        return message.request_id;
     } catch (e) {
         console.error('Send error:', e);
         appendSystemMsg('Не удалось отправить сообщение', 'error');

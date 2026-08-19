@@ -29,3 +29,10 @@ The table above preserves the original findings. B01–B06 and B12 are now addre
 B11 is partially addressed: departed users' avatar caches are removed (history has its own copy). Slow-client backpressure is still outstanding. B13 is partially addressed: 13 JUnit tests and a server smoke probe exist, and the UI was manually checked in the in-app browser. An automated browser runner, CI, wrapper and containers remain outstanding.
 
 B07–B10 remain open. The server still writes history synchronously, sends it in a single JOIN response and lacks end-to-end delivery acknowledgements. Header checks are not full image sanitization. No load-test or dependency-security claims are made.
+
+
+## Stage 2 status (2026-11-13)
+
+B07 and B08 are addressed: canonical schema, explicit PM recipient and byte-bounded history responses. B10 is partially addressed: the running server sends an outside-window last image separately and the client displays it; independent last-image persistence still remains. B13 now includes 21 JUnit tests, 7 Node tests, a Java/JavaScript integration scenario and locally built browser scripts without a CDN runtime dependency. CI, wrapper and containers remain outstanding. See `stage-2.md` and `protocol.md` for the exact contracts and limits.
+
+B09 and the slow-client portion of B11 are still open. Responses currently acknowledge server handling, not durable commits. The history migration is tested on synthetic records only.

@@ -1,0 +1,11 @@
+{
+  "name": "realtime-messaging-lab-client",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.cjs",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "dependencies": { "protobufjs": "8.8.1" },
+  "engines": { "node": ">=22" }
+}

@@ -6,6 +6,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketFrameAggregator;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketServerCompressionHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 
@@ -13,7 +14,9 @@ import io.netty.handler.stream.ChunkedWriteHandler;
 public class ChatServerInitializer extends ChannelInitializer<SocketChannel> {
 
     // One shared ChatRoom for the whole server
-    private static final ChatRoom CHAT_ROOM = new ChatRoom();
+    private final ChatRoom chatRoom;
+
+    public ChatServerInitializer(ChatRoom chatRoom) { this.chatRoom = chatRoom; }
 
     // Max frame / aggregated HTTP body size: 2 MB (enough for images ≤ 1 MB + overhead)
     private static final int MAX_CONTENT_LENGTH = 2 * 1024 * 1024;
@@ -32,6 +35,7 @@ public class ChatServerInitializer extends ChannelInitializer<SocketChannel> {
                 true,
                 MAX_CONTENT_LENGTH
         ));
-        pipeline.addLast(new WebSocketHandler(CHAT_ROOM));
+        pipeline.addLast(new WebSocketFrameAggregator(MAX_CONTENT_LENGTH));
+        pipeline.addLast(new WebSocketHandler(chatRoom));
     }
 }

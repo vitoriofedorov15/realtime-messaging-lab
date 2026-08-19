@@ -21,7 +21,7 @@ public class ChatServer {
                     .group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
                     .handler(new LoggingHandler(LogLevel.INFO))
-                    .childHandler(new ChatServerInitializer());
+                    .childHandler(new ChatServerInitializer(new ChatRoom()));
 
             Channel channel = bootstrap.bind(PORT).sync().channel();
 

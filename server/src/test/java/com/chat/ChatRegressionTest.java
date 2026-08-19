@@ -25,6 +25,7 @@ class ChatRegressionTest {
         var ch = new EmbeddedChannel(new WebSocketHandler(room)); channels.add(ch); return ch;
     }
     List<ServerResponse> drain(EmbeddedChannel ch) throws Exception {
+        ch.runPendingTasks();
         List<ServerResponse> out = new ArrayList<>(); BinaryWebSocketFrame frame;
         while ((frame = ch.readOutbound()) != null) {
             try { byte[] bytes = new byte[frame.content().readableBytes()]; frame.content().readBytes(bytes); out.add(ServerResponse.parseFrom(bytes)); }
@@ -33,8 +34,8 @@ class ChatRegressionTest {
         return out;
     }
     ServerResponse send(EmbeddedChannel ch, ClientRequest request) throws Exception {
-        ch.writeInbound(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(request.toByteArray())));
-        var responses = drain(ch); assertEquals(1, responses.size(), "Expected one direct response"); return responses.get(0);
+        ch.writeInbound(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(request.toBuilder().setProtocolVersion(2).setRequestId("test-request").build().toByteArray())));
+        var responses = drain(ch).stream().filter(r -> !r.hasHistoryBatch()).toList(); assertEquals(1, responses.size(), "Expected one direct response"); return responses.get(0);
     }
     ClientRequest join(String name) { return ClientRequest.newBuilder().setType(ClientRequest.RequestType.JOIN).setJoin(JoinRequest.newBuilder().setName(name)).build(); }
     ClientRequest chat(String text) { return ClientRequest.newBuilder().setType(ClientRequest.RequestType.CHAT).setChat(ChatRequest.newBuilder().setText(text)).build(); }
@@ -49,7 +50,7 @@ class ChatRegressionTest {
     }
     @Test void repeatedJoinDoesNotRenameOrLeakName() throws Exception {
         var a = joined("Alice"); var result = send(a,join("Bob"));
-        assertEquals(409,result.getError().getErrorCode()); assertTrue(result.getError().getErrorMessage().contains("ALREADY_JOINED"));
+        assertEquals(409,result.getError().getErrorCode()); assertTrue(result.getError().getCode().equals("ALREADY_JOINED"));
         assertEquals("Alice",room.getUserName(a)); assertNull(room.getChannelByName("Bob"));
         a.close(); assertFalse(room.isUserOnline("Alice")); assertEquals(0,room.getActiveUserCount());
         assertTrue(send(client(),join("Alice")).hasJoinSuccess());

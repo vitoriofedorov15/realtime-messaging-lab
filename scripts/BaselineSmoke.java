@@ -21,6 +21,8 @@ public class BaselineSmoke {
         final ByteArrayOutputStream fragments = new ByteArrayOutputStream();
         volatile Throwable failure;
         WebSocket socket;
+        int requestCounter;
+        final java.util.List<HistoryMessage> restoredHistory = new java.util.ArrayList<>();
         Client() {
             socket = HttpClient.newHttpClient().newWebSocketBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
@@ -39,7 +41,7 @@ public class BaselineSmoke {
         }
         public void onError(WebSocket ws, Throwable error) { failure = error; }
         void send(ClientRequest request) {
-            socket.sendBinary(ByteBuffer.wrap(request.toByteArray()), true).join();
+            socket.sendBinary(ByteBuffer.wrap(request.toBuilder().setProtocolVersion(2).setRequestId("smoke_" + (++requestCounter)).build().toByteArray()), true).join();
         }
         ServerResponse await(Predicate<ServerResponse> condition) throws Exception {
             long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -53,8 +55,16 @@ public class BaselineSmoke {
         ServerResponse join(String name) throws Exception {
             send(ClientRequest.newBuilder().setType(ClientRequest.RequestType.JOIN)
                 .setJoin(JoinRequest.newBuilder().setName(name)).build());
-            return await(r -> r.getType() == ServerResponse.ResponseType.JOIN_SUCCESS
-                || r.getType() == ServerResponse.ResponseType.JOIN_ERROR);
+            ServerResponse response = await(r -> r.hasJoinSuccess() || r.getType() == ServerResponse.ResponseType.JOIN_ERROR);
+            restoredHistory.clear();
+            if (response.hasJoinSuccess()) {
+                while (true) {
+                    HistoryBatch batch = await(r -> r.hasHistoryBatch()).getHistoryBatch();
+                    restoredHistory.addAll(batch.getHistoryList());
+                    if (batch.getComplete()) break;
+                }
+            }
+            return response;
         }
         public void close() { socket.abort(); }
     }
@@ -123,8 +133,8 @@ public class BaselineSmoke {
             stop(); start(jar);
             try (Client reader = new Client()) {
                 JoinSuccessResponse restored = reader.join("Reader").getJoinSuccess();
-                check(restored.getHistoryCount() == 2, "Two public messages survive restart; PM absent");
-                check(restored.getHistory(0).getText().equals("baseline hello"), "Restored history content matches");
+                check(reader.restoredHistory.size() == 2, "Two public messages survive restart; PM absent");
+                check(reader.restoredHistory.get(0).getText().equals("baseline hello"), "Restored history content matches");
             }
             // Regression: repeated JOIN must preserve the existing registration.
             ChatRoom room = new ChatRoom();
