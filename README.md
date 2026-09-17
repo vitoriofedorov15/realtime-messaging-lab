@@ -1,89 +1,88 @@
-# Realtime Messaging Lab
+# Common
 
-A coursework WebSocket chat built with Java, Netty and Protocol Buffers, being developed into a reproducible engineering portfolio project.
+### A little space for good conversations.
 
-**Status: stage 2 — versioned protocol and ordered history synchronization.** Registration and validation fixes are covered by regression tests; both clients use one canonical schema. Persistence hardening is the next stage. This is not a production service.
+A responsive messaging interface with a Java / Netty backend and a binary Protocol Buffers protocol. Explore a built-in demo, or join a live room with public messages, private conversations and image sharing.
 
-See the [protocol contract](docs/protocol.md), [stage 2 verification](docs/stage-2.md) and [known issues](docs/known-issues.md). Earlier reports: [stage 1](docs/stage-1.md), [source baseline](docs/baseline.md).
+**Frontend:** React 19 · TypeScript · Vite · Lucide · CSS
 
-## Current implementation
+**Backend:** Java 17 · Netty · WebSocket · Protocol Buffers · Maven
 
-- Java 17 / Netty server, browser client using plain JavaScript.
-- Binary WebSocket messages encoded with Protocol Buffers.
-- Named users, public and private messages, image attachments and avatars.
-- File-based public message history.
+## A room that feels like a room
 
-See [stage 1 verification](docs/stage-1.md), the historical [baseline](docs/baseline.md) and [known issues](docs/known-issues.md).
+- A calm, responsive workspace with an online participant list.
+- Public conversation and individual private threads.
+- Images, avatars, attachment previews and an image viewer.
+- Search, session bookmarks, emoji and drafts per conversation.
+- Visible connection/reconnect states and message errors.
+- A clearly labelled demo you can explore without running the backend.
 
-## Build
+Demo data is synthetic. Live chat uses the same canonical Protobuf schema on both sides. This is a coursework-derived portfolio project, not a production messenger.
 
-Requirements: JDK 17, Maven and Node.js 22+ with npm (verified with JDK 17.0.19, Maven 3.9.12 and Node 24.3.0). Set `JAVA_HOME` to JDK 17 when another version is the default. A first build downloads dependencies from Maven Central and npm.
+## Try the frontend
 
-From the repository root:
-
-```sh
-sh scripts/build.sh
-```
-
-This uses `npm ci`, generates local browser assets from `protocol/chat.proto`, runs 7 Node tests, then builds the server and runs 21 JUnit tests. Generated assets and JARs are not committed. Maven options can be appended to the script command.
-
-Individual steps:
+Requires Node.js 22.12+ and npm.
 
 ```sh
 npm ci --prefix client --ignore-scripts
-npm run build --prefix client
-npm test --prefix client
-mvn -f server/pom.xml clean package
+npm run dev --prefix client
 ```
 
-## Run locally
+Open **http://127.0.0.1:5173**. The preview is immediately available. Demo messages remain in this browser session; the demo does not impersonate real users or send messages to the server.
 
-From the repository root:
+## Connect to live chat
+
+Requires JDK 17 and Maven. In a second terminal, from the repository root:
 
 ```sh
+mvn -f server/pom.xml clean package
 mkdir -p runtime
 cd runtime
 java -jar ../server/target/chat-server-1.0-SNAPSHOT-jar-with-dependencies.jar
 ```
 
-Open `client/index.html` in a browser, enter a name and join. Open another tab with a different name to exchange messages. After the build, all browser scripts are local; no CDN connection is needed. Reload existing tabs after rebuilding the protocol. The original coursework client is incompatible with v2 and receives a version error.
+Choose **Join a live room** in the UI. Open another tab and use a different name to exchange messages. The Vite development server proxies `/ws` to the Java server on port 8080.
 
-- WebSocket endpoint: `ws://localhost:8080/ws` (currently hardcoded).
-- Stop the server with Ctrl+C.
-- History is written to `chat_history.bin` in the server's working directory, here `runtime/` (ignored by Git).
-- The original server binds the port on all interfaces. Use only in a trusted local development environment; authentication, TLS and configurable bind addresses have not been added.
+History is stored in the ignored `runtime/` directory. Stop each development process with Ctrl+C. The current Java server binds on all interfaces; its persistence and resource limits still need the improvements listed in [known issues](docs/known-issues.md).
 
-## WebSocket smoke check
-
-Stop any server using port 8080 first, then run from the repository root:
+## Build and preview
 
 ```sh
+npm run build --prefix client
+npm run preview --prefix client
+```
+
+Production-build preview: **http://127.0.0.1:4173**. For separate hosting, configure `VITE_WS_URL` before building or reverse-proxy `/ws`. Static hosting alone supports the demo, but live messages require the Java server. See [frontend notes](docs/frontend.md).
+
+The combined `sh scripts/build.sh` also installs frontend dependencies, builds both parts and runs existing checks. A first installation needs access to npm and Maven Central.
+
+To export a single-file, offline demo after building:
+
+```sh
+npm run export:preview --prefix client
+```
+
+Open `client/dist/common-preview.html` in a regular browser. The demo is self-contained. Live mode still requires the Java server and a permitted WebSocket connection.
+
+## Under the interface
+
+The canonical schema is [`protocol/chat.proto`](protocol/chat.proto). Protocol v2 includes version checks, request correlation, message UUIDs, participant snapshots and byte-limited history batches. A public sequence lets the client detect gaps and suppress duplicate messages while joining.
+
+Images are limited to PNG/JPEG up to 1 MiB (avatars: 200 KiB). Names use 1–50 letters, numbers, `_` or `-`. The original 25-code-point text limit is kept and displayed in the composer.
+
+Read the [protocol contract](docs/protocol.md) for delivery semantics and remaining limitations. Private messages are not written to shared history. A server response is not a read receipt or a guarantee of durable storage.
+
+## Development checks
+
+```sh
+npm test --prefix client
+mvn -f server/pom.xml test
 sh scripts/smoke-baseline.sh
 node scripts/protocol-smoke.cjs
 ```
 
-This compiles a standalone Java probe, launches the freshly built server, connects real WebSocket clients and checks public/private messaging and history after a restart. It uses synthetic messages in a temporary directory; that directory is printed and retained with its server log for inspection. Probe classes are removed automatically. Only the server process created by the probe is stopped.
+The WebSocket probes require a built server and a free port 8080. They use synthetic data in temporary directories. Earlier verification reports: [baseline](docs/baseline.md), [correctness](docs/stage-1.md), [protocol](docs/stage-2.md).
 
-The historical script name is retained, but its expectations now verify that repeated JOIN is rejected and the original name is released on disconnect. It also checks that private-message text is absent from the server log.
+## Project origins
 
-The JavaScript integration additionally exercises byte-bounded large history and three concurrent JOINs during live traffic. These are protocol checks, not browser UI or load tests. The PM isolation check covers a short observed scenario, not every possible concurrent interleaving.
-
-## Next steps
-
-1. Completed: registration, validation, private-message edge cases and previews, with regression tests.
-2. Completed: canonical versioned protocol, bounded history transfer and ordered live synchronization.
-3. Improve persistence and bounded resource handling.
-4. Improve the interface and reconnection behavior.
-5. Add reproducible packaging and CI.
-6. Publish actual measurements, screenshots and a short demo.
-
-The coursework report, personal chat history, IDE settings and existing build artifacts are intentionally excluded. No license has been selected yet.
-
-## Current validation rules
-
-- Case-sensitive names: 1–50 Unicode letters/digits, `_` or `-`, after trimming outer spaces.
-- Message bodies: at most 25 Unicode code points (including emoji); private-recipient prefixes are excluded. Empty/whitespace-only messages require an attachment. Overlength messages are rejected, not truncated.
-- PNG/JPEG attachments: 1 byte to 1 MiB; avatars: 1 byte to 200 KiB.
-- Server checks the signature, matching MIME and image header dimensions: at most 4096 pixels per side and 16,000,000 pixels total.
-- Image checks read bounded headers in memory; they do not decode all pixels, sanitize/re-encode images or guarantee that every corrupted pixel stream is detected.
-- Invalid file selection clears the old selection; in-flight older reads cannot restore it.
+Built from a WebSocket / Protobuf coursework assignment and expanded for a software-engineering portfolio. React replaces the original single-file JavaScript client. Personal reports, real chat history, IDE files and build artifacts are excluded. No license has been selected yet.

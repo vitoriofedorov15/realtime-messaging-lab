@@ -4,14 +4,12 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const protobuf=require('protobufjs');
-const ProtocolState=require('../protocol-state.js');
+const ProtocolState=require('../src/protocol-state.js').default;
 const msg=(id,seq)=>({message_id:id,sequence:String(seq)});
 const batch=(entries,complete=false,watermark='2')=>({history:entries,complete,snapshot_sequence:watermark});
-test('canonical schema produces the exact generated browser source',()=>{
-  const context={window:{}};
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../generated/protocol.js'),'utf8'),context);
-  assert.equal(context.window.CHAT_PROTO_SCHEMA,fs.readFileSync(path.join(__dirname,'../../protocol/chat.proto'),'utf8'));
-  const root=protobuf.parse(context.window.CHAT_PROTO_SCHEMA,{keepCase:true}).root;
+test('canonical schema supports versioned oneof commands',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../../protocol/chat.proto'),'utf8');
+  const root=protobuf.parse(source,{keepCase:true}).root;
   const request=root.lookupType('chat.ClientRequest');
   const value={type:1,chat:{text:'hello'},protocol_version:2,request_id:'req_1'};
   const decoded=request.decode(request.encode(request.create(value)).finish());

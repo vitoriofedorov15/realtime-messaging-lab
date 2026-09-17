@@ -8,7 +8,7 @@ const {createRequire}=require('node:module');
 const assert=require('node:assert/strict');
 const project=path.resolve(__dirname,'..');
 const protobuf=createRequire(path.join(project,'client/package.json'))('protobufjs');
-const ProtocolState=require('../client/protocol-state.js');
+const ProtocolState=require('../client/src/protocol-state.js').default;
 const schema=protobuf.parse(fs.readFileSync(path.join(project,'protocol/chat.proto'),'utf8'),{keepCase:true}).root;
 const Request=schema.lookupType('chat.ClientRequest'), Response=schema.lookupType('chat.ServerResponse');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));

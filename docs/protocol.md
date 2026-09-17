@@ -4,7 +4,7 @@ Canonical source: `protocol/chat.proto`. This version intentionally requires bot
 
 ## Build and transport
 
-Maven generates Java classes from the canonical file. `npm run build --prefix client` validates the same file, generates `client/generated/protocol.js` and copies the pinned local protobuf.js runtime and its license. Generated browser files are ignored by Git; run `sh scripts/build.sh` before opening the client. Runtime loading does not use a CDN.
+Maven generates Java classes from the canonical file. The React frontend imports the same source with a Vite raw import in `src/chat.ts`; its build bundles the schema and pinned protobuf.js runtime into `client/dist`. Generated assets are ignored by Git. Runtime loading does not use a CDN. This replaces the stage-2 generated script approach; protocol v2 itself is unchanged.
 
 Each binary WebSocket message contains one Protobuf envelope. Inbound fragmented messages are aggregated, with a 2 MiB total message limit. Outbound envelopes are at most **1,572,864 bytes (1.5 MiB)**, measured using their serialized size, including metadata. Text WebSocket messages are not the business protocol.
 

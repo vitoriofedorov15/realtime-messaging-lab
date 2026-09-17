@@ -1,6 +1,4 @@
-/* Shared by the browser and Node regression tests; uint64 counters stay exact. */
-(function (scope) {
-    class ProtocolState {
+export default class ProtocolState {
         constructor() { this.users = new Set(); this.seen = new Set(); this.ready = false; this.watermark = 0n; this.last = 0n; }
         start(watermark, users) {
             this.watermark = BigInt(watermark.toString());
@@ -33,6 +31,3 @@
             this.remember(message.message_id); this.last=sequence; return true;
         }
     }
-    if (typeof module !== 'undefined') module.exports=ProtocolState;
-    else scope.ProtocolState=ProtocolState;
-})(typeof window !== 'undefined' ? window : this);
