@@ -30,6 +30,16 @@ npm run dev --prefix client
 
 Open **http://127.0.0.1:5173**. The preview is immediately available. Demo messages remain in this browser session; the demo does not impersonate real users or send messages to the server.
 
+## Start both parts together
+
+With Node, JDK 17 and Maven installed, run from the repository root:
+
+```sh
+sh scripts/dev.sh
+```
+
+This checks that ports 8080/5173 are free, builds missing server/client dependencies, and starts both processes. Open **http://127.0.0.1:5173**. Keep the terminal open; Ctrl+C stops the processes started by this script. It does not stop unrelated servers.
+
 ## Connect to live chat
 
 Requires JDK 17 and Maven. In a second terminal, from the repository root:
