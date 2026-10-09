@@ -8,6 +8,8 @@ A responsive messaging interface with a Java / Netty backend and a binary Protoc
 
 **Backend:** Java 17 · Netty · WebSocket · Protocol Buffers · Maven
 
+![Common desktop interface — running demo](docs/screenshots/common-desktop.jpg)
+
 ## A room that feels like a room
 
 - A calm, responsive workspace with an online participant list.

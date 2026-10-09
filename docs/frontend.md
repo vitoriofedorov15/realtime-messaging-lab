@@ -50,6 +50,10 @@ The user prioritized visual quality and portfolio presentation over further infr
 
 TypeScript checking and a production Vite build completed. The 7 existing client/protocol checks passed. The Java server code was not changed in this phase.
 
-Visual QA and a new end-to-end React-to-Java run remain **unverified**: the execution environment denied a localhost listening port (`EPERM`), and the browser URL policy rejected local file navigation (HTTP/HTTPS only). No screenshots are presented as verified output. The single-file preview is exported for ordinary local opening by the user.
+Desktop browser QA completed against the user-started Vite and Java servers on 2026-11-13 at 1280 × 720. Verified demo sending, session bookmarks, conversation search, the image viewer and Escape dismissal. Two independent browser tabs joined as synthetic users ReviewAlice and ReviewBob; a public message appeared in the other tab and a private reply appeared in the intended thread. Both tabs reported no console errors during this scenario.
 
-The earlier server/integration results in stage reports apply to the earlier frontend, not to the new React screens.
+The [desktop screenshot](screenshots/common-desktop.jpg) captures the actual running demo. It is not a mockup.
+
+Mobile visual QA remains outstanding: the browser viewport API accepted a 390 × 844 override but the actual page and screenshots remained 1280 × 720, including in a fresh tab. No mobile screenshot or mobile verification is claimed. Live image uploads, reconnect behavior and virtual-keyboard behavior were not rechecked in this pass.
+
+The earlier server/integration results in stage reports apply to their stated scenarios, not to every new React control.
