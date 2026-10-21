@@ -2,7 +2,7 @@
 
 ### A little space for good conversations.
 
-A responsive messaging interface with a Java / Netty backend and a binary Protocol Buffers protocol. Explore a built-in demo, or join a live room with public messages, private conversations and image sharing.
+A real-time client–server chat developed as a **Computer Networks course project**, with a Java / Netty server, a binary Protocol Buffers application protocol, and a React interface. Explore the built-in demo or connect multiple clients to exchange public messages, private messages, and images.
 
 **Frontend:** React 19 · TypeScript · Vite · Lucide · CSS
 
@@ -10,7 +10,17 @@ A responsive messaging interface with a Java / Netty backend and a binary Protoc
 
 ![Common desktop interface — running demo](docs/screenshots/common-desktop.jpg)
 
-## A room that feels like a room
+## Computer Networks concepts
+
+- **Client–server architecture:** a central Netty server manages connected users and routes messages.
+- **Persistent, bidirectional communication:** binary WebSocket frames carry requests and responses over a TCP connection.
+- **Application protocol design:** a shared Protocol Buffers schema defines message types, payloads, protocol versions, and request identifiers.
+- **Multi-client synchronization:** participant snapshots, public message sequence numbers, and bounded history batches help clients synchronize when joining.
+- **Input validation:** the server checks names, text length, image formats, and payload limits.
+
+Public and private messaging were manually verified between two browser clients connected to the Java server. See the [protocol documentation](docs/protocol.md) for the wire contract and [verification notes](docs/frontend.md) for the scope of browser checks.
+
+## Features
 
 - A calm, responsive workspace with an online participant list.
 - Public conversation and individual private threads.
@@ -97,4 +107,4 @@ The WebSocket probes require a built server and a free port 8080. They use synth
 
 ## Project origins
 
-Built from a WebSocket / Protobuf coursework assignment and expanded for a software-engineering portfolio. React replaces the original single-file JavaScript client. Personal reports, real chat history, IDE files and build artifacts are excluded. No license has been selected yet.
+Originally developed for the Computer Networks course and expanded into a portfolio project. React replaces the original single-file JavaScript client. Personal reports, real chat history, IDE files and build artifacts are excluded. No license has been selected yet.
