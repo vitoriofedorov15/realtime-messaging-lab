@@ -107,4 +107,4 @@ The WebSocket probes require a built server and a free port 8080. They use synth
 
 ## Project origins
 
-Originally developed for the Computer Networks course and expanded into a portfolio project. React replaces the original single-file JavaScript client. Personal reports, real chat history, IDE files and build artifacts are excluded. No license has been selected yet.
+Originally developed for the Computer Networks course and expanded into a portfolio project.
